@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ddlin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="dicts"></div>
+  <button id="folder" title="Choose dictionary folder">Folder…</button>
+</header>
+<main>
+  <section id="side">
+    <div id="modes">
+      <button data-mode="Prefix">Prefix</button>
+      <button data-mode="Suffix">Suffix</button>
+      <button data-mode="Exact">Exact</button>
+    </div>
+    <form id="form"><input id="query" autocomplete="off" spellcheck="false"><button>Search</button></form>
+    <div id="count"></div>
+    <ul id="hits"></ul>
+  </section>
+  <section id="text"></section>
+</main>
+<script src="main.js"></script>
+</body>
+</html>
