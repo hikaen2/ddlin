@@ -29,28 +29,45 @@ function render(overview) {
   hits = [];
   current = -1;
   $("count").textContent = "";
-  if (!overview.root) message(text, "Choose a dictionary folder to start (Folder…).");
-  else if (!dicts.length) message(text, "No dictionaries found in " + overview.root);
+  folders = overview.folders;
+  if (!folders.length) message(text, "Add dictionary folders to start (Folders…).");
+  else if (!dicts.length) message(text, "No dictionaries found in the dictionary folders.");
   else message(text, "");
-  select(dicts.find((d) => d.prefix) || dicts[0] || null);
+  select(savedDict() || dicts.find((d) => d.prefix) || dicts[0] || null);
+}
+
+// The last selected dictionary, matched by id and title (ids shift when
+// the folder changes, so fall back to the title).
+function savedDict() {
+  try {
+    const { id, title } = JSON.parse(localStorage.getItem("dict"));
+    return dicts.find((d) => d.id === id && d.title === title) || dicts.find((d) => d.title === title);
+  } catch {
+    return null;
+  }
 }
 
 function select(d) {
   dict = d;
+  try {
+    if (d) localStorage.setItem("dict", JSON.stringify({ id: d.id, title: d.title }));
+  } catch {}
   [...$("dicts").children].forEach((b, i) => b.classList.toggle("on", dicts[i] === d));
   $("status").textContent = d ? d.title : "";
-  for (const b of $("modes").children) b.disabled = !d || !d[b.dataset.mode.toLowerCase()];
+  for (const b of modeButtons()) b.disabled = !d || !d[b.dataset.mode.toLowerCase()];
+  $("menu").disabled = !d || !d.menu;
   if (d && !d[mode.toLowerCase()]) {
-    const m = ["Prefix", "Suffix", "Exact"].find((m) => d[m.toLowerCase()]);
+    const m = ["Prefix", "Suffix"].find((m) => d[m.toLowerCase()]);
     if (m) mode = m;
   }
   setMode(mode);
-  if (d && !(d.prefix || d.suffix || d.exact)) {
+  if (d && !(d.prefix || d.suffix)) {
     $("hits").innerHTML = "";
     hits = [];
     current = -1;
     $("count").textContent = "";
-    message(text, "This dictionary has no word search.");
+    if (d.menu) showMenu();
+    else message(text, "This dictionary has no word search or menu.");
     return;
   }
   if ($("query").value) search();
@@ -58,15 +75,62 @@ function select(d) {
 
 function setMode(m) {
   mode = m;
-  for (const b of $("modes").children) b.classList.toggle("on", b.dataset.mode === m && !b.disabled);
+  for (const b of modeButtons()) b.classList.toggle("on", b.dataset.mode === m && !b.disabled);
 }
 
 let hits = [];
 let current = -1;         // index of the selected heading
 
+// Search history, newest first, shown when the ▼ button is pressed.
+const HISTORY_MAX = 100;
+let searchHistory = [];
+try {
+  searchHistory = JSON.parse(localStorage.getItem("history")) || [];
+} catch {}
+// Start with the last searched word, as DDwin does.
+$("query").value = searchHistory[0] || "";
+
+function remember(query) {
+  searchHistory = [query, ...searchHistory.filter((q) => q !== query)].slice(0, HISTORY_MAX);
+  try {
+    localStorage.setItem("history", JSON.stringify(searchHistory));
+  } catch {}
+}
+
+function toggleHistory() {
+  const list = $("history");
+  if (!list.hidden) {
+    list.hidden = true;
+    return;
+  }
+  list.replaceChildren(...searchHistory.map((q) => {
+    const li = document.createElement("li");
+    li.textContent = q;
+    return li;
+  }));
+  if (!searchHistory.length) list.innerHTML = `<li class="empty">No history</li>`;
+  list.hidden = false;
+}
+
+$("historyButton").onclick = toggleHistory;
+$("history").addEventListener("click", (e) => {
+  const li = e.target.closest("li:not(.empty)");
+  if (!li) return;
+  $("history").hidden = true;
+  $("query").value = li.textContent;
+  search();
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#history, #historyButton")) $("history").hidden = true;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("history").hidden = true;
+});
+
 async function search() {
   const query = $("query").value.trim();
   if (!dict || !query || !dict[mode.toLowerCase()]) return;
+  remember(query);
   hits = await invoke("search", { id: dict.id, query, mode });
   const ul = $("hits");
   ul.innerHTML = hits.map((h, i) => `<li data-i="${i}">${h.heading}</li>`).join("");
@@ -198,8 +262,18 @@ text.addEventListener("click", (e) => {
   openAt({ page, offset });
 });
 
+function modeButtons() {
+  return $("modes").querySelectorAll("[data-mode]");
+}
+
+async function showMenu() {
+  const pos = await invoke("menu", { id: dict.id });
+  if (pos) openAt(pos);
+}
+
+$("menu").onclick = showMenu;
 $("modes").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
+  const b = e.target.closest("[data-mode]");
   if (!b || b.disabled) return;
   setMode(b.dataset.mode);
   search();
@@ -269,6 +343,35 @@ $("fonts").addEventListener("close", () => {
 
 invoke("get_fonts").then(applyFonts);
 
-$("folder").onclick = async () => render(await invoke("choose_folder"));
+// Dictionary folders: edited in the dialog, saved on OK.
+let folders = [];
+let editing = [];
+
+function showFolders() {
+  const list = $("folderList");
+  list.innerHTML = "";
+  for (const f of editing) list.add(new Option(f, f));
+}
+
+$("folder").onclick = () => {
+  editing = [...folders];
+  showFolders();
+  $("folders").showModal();
+};
+$("folderAdd").onclick = async () => {
+  for (const f of await invoke("pick_folders")) if (!editing.includes(f)) editing.push(f);
+  showFolders();
+};
+$("folderRemove").onclick = () => {
+  const i = $("folderList").selectedIndex;
+  if (i < 0) return;
+  editing.splice(i, 1);
+  showFolders();
+  $("folderList").selectedIndex = Math.min(i, editing.length - 1);
+};
+$("foldersCancel").onclick = () => $("folders").close("cancel");
+$("folders").addEventListener("close", async () => {
+  if ($("folders").returnValue === "ok") render(await invoke("set_folders", { folders: editing }));
+});
 
 invoke("get_overview").then(render);

@@ -3,7 +3,7 @@ use ddlin_core::{Dir, Library, Mode, Pos};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let lib = Library::open(args[0].as_ref());
+    let lib = Library::open(&[args[0].clone().into()]);
     if args.len() < 4 {
         for d in lib.dicts() {
             println!("{} {} prefix={} suffix={} exact={}", d.id, d.title, d.prefix, d.suffix, d.exact);
@@ -11,6 +11,12 @@ fn main() {
         return;
     }
     let dict = lib.dicts().iter().find(|d| d.title.contains(&args[1])).expect("dict");
+    if args[2] == "menu" {
+        let pos = lib.menu(dict.id).unwrap().expect("no menu");
+        let seg = lib.read_segment(dict.id, pos, Dir::Forward).unwrap();
+        println!("menu={pos:?} next={:?}\n{}", seg.next, seg.html);
+        return;
+    }
     if args[2] == "pos" {
         let (page, offset) = args[3].split_once(':').unwrap();
         let pos = Pos { page: page.parse().unwrap(), offset: offset.parse().unwrap() };

@@ -5,7 +5,7 @@ mod render;
 // libeb needs zlib at link time.
 use libz_sys as _;
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,7 @@ pub struct Dict {
     pub prefix: bool,
     pub suffix: bool,
     pub exact: bool,
+    pub menu: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -84,8 +85,14 @@ struct Slot {
     gaiji: GaijiCache,
 }
 
-/// libeb keeps global state (e.g. its text cache), so every call goes
-/// through one lock.
+/// libeb keeps global state (e.g. its text cache), so every call into it,
+/// from any Library, goes through this lock.
+static EB: Mutex<()> = Mutex::new(());
+
+fn eb_lock() -> std::sync::MutexGuard<'static, ()> {
+    EB.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 struct Books {
     books: Vec<Book>,
     slots: Vec<Slot>,
@@ -97,14 +104,28 @@ pub struct Library {
 }
 
 impl Library {
-    /// Opens every book directly under `root`, skipping directories that are not books.
-    pub fn open(root: &Path) -> Library {
+    /// Opens the books in `folders`, in order. A folder that is not a book
+    /// itself is searched for books directly under it; other directories
+    /// are skipped. The same book is opened only once.
+    pub fn open(folders: &[PathBuf]) -> Library {
+        let _eb = eb_lock();
+        let mut dirs = vec![];
+        for folder in folders {
+            if Book::open(folder).is_ok() {
+                dirs.push(folder.clone());
+                continue;
+            }
+            let mut subdirs: Vec<_> = std::fs::read_dir(folder)
+                .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+                .unwrap_or_default();
+            subdirs.sort();
+            dirs.extend(subdirs);
+        }
+        let mut seen = std::collections::HashSet::new();
+        dirs.retain(|d| seen.insert(d.canonicalize().unwrap_or_else(|_| d.clone())));
+
         let mut dicts = vec![];
         let mut inner = Books { books: vec![], slots: vec![] };
-        let mut dirs: Vec<_> = std::fs::read_dir(root)
-            .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
-            .unwrap_or_default();
-        dirs.sort();
         for dir in dirs {
             let Ok(mut book) = Book::open(&dir) else { continue };
             let subbooks = book.subbooks();
@@ -113,10 +134,11 @@ impl Library {
                 if book.select(sb).is_err() {
                     continue;
                 }
-                entries.push((sb, book.title(), book.has_word(), book.has_endword(), book.has_exactword()));
+                let menu = book.menu().is_some();
+                entries.push((sb, book.title(), book.has_word(), book.has_endword(), book.has_exactword(), menu));
             }
-            for (sb, title, prefix, suffix, exact) in entries {
-                dicts.push(Dict { id: dicts.len(), title, prefix, suffix, exact });
+            for (sb, title, prefix, suffix, exact, menu) in entries {
+                dicts.push(Dict { id: dicts.len(), title, prefix, suffix, exact, menu });
                 inner.slots.push(Slot { book: inner.books.len(), subbook: sb, gaiji: GaijiCache::new() });
             }
             inner.books.push(book);
@@ -129,6 +151,7 @@ impl Library {
     }
 
     fn with<T>(&self, id: usize, f: impl FnOnce(&mut Book, &mut GaijiCache) -> Result<T, Error>) -> Result<T, Error> {
+        let _eb = eb_lock();
         let mut guard = self.inner.lock().unwrap();
         let Books { books, slots } = &mut *guard;
         let slot = slots.get_mut(id).ok_or(Error::NoDict)?;
@@ -158,6 +181,11 @@ impl Library {
         })
     }
 
+    /// Start of the dictionary's menu, if it has one.
+    pub fn menu(&self, id: usize) -> Result<Option<Pos>, Error> {
+        self.with(id, |book, _| Ok(book.menu()))
+    }
+
     /// Reads about SEGMENT_SIZE bytes of whole entries.
     ///
     /// Forward reads starting at `pos`; Backward reads the entries just
@@ -170,6 +198,15 @@ impl Library {
                 Dir::Backward => read_backward(book, &mut r, pos),
             }
         })
+    }
+}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        let _eb = eb_lock();
+        if let Ok(inner) = self.inner.get_mut() {
+            inner.books.clear();
+        }
     }
 }
 

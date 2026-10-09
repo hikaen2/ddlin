@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["core", "app"]
+
+# Dependencies without debug info keep target/debug small.
+[profile.dev.package."*"]
+debug = false

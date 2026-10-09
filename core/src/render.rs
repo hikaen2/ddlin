@@ -11,15 +11,34 @@ use crate::Pos;
 /// Gaiji images keyed by (wide, code).
 pub type GaijiCache = HashMap<(bool, u32), String>;
 
+/// A graphic in the text, read after the text is rendered.
+pub enum Graphic {
+    Color { pos: Pos, jpeg: bool },
+    Mono { pos: Pos, width: i32, height: i32 },
+}
+
 pub struct Render<'a> {
     pub gaiji: &'a mut GaijiCache,
     pub heading: bool,
     refs: Vec<Option<Pos>>,
+    /// Graphics written as `<img data-graphic="N">` placeholders.
+    pub graphics: Vec<Graphic>,
+    /// Size of the monochrome graphic being read: (width, height).
+    mono: Option<(i32, i32)>,
 }
 
 impl<'a> Render<'a> {
     pub fn new(gaiji: &'a mut GaijiCache) -> Self {
-        Render { gaiji, heading: false, refs: vec![] }
+        Render { gaiji, heading: false, refs: vec![], graphics: vec![], mono: None }
+    }
+
+    unsafe fn graphic(&mut self, book: *mut EB_Book, g: Graphic) {
+        // Headings stay text only, as in DDwin.
+        if self.heading {
+            return;
+        }
+        self.graphics.push(g);
+        write(book, &format!("<img class=\"graphic\" data-graphic=\"{}\">", self.graphics.len() - 1));
     }
 
     /// Resolves reference placeholders written by the hooks.
@@ -66,6 +85,16 @@ pub fn install_hooks(hookset: &mut EB_Hookset) {
         (EB_HOOK_END_KEYWORD, tag_hook),
         (EB_HOOK_BEGIN_REFERENCE, tag_hook),
         (EB_HOOK_END_REFERENCE, tag_hook),
+        // Menu items are candidates that point to their target.
+        (EB_HOOK_BEGIN_CANDIDATE, tag_hook),
+        (EB_HOOK_END_CANDIDATE_GROUP, tag_hook),
+        (EB_HOOK_END_CANDIDATE_LEAF, tag_hook),
+        (EB_HOOK_BEGIN_COLOR_BMP, tag_hook),
+        (EB_HOOK_BEGIN_COLOR_JPEG, tag_hook),
+        (EB_HOOK_BEGIN_IN_COLOR_BMP, tag_hook),
+        (EB_HOOK_BEGIN_IN_COLOR_JPEG, tag_hook),
+        (EB_HOOK_BEGIN_MONO_GRAPHIC, tag_hook),
+        (EB_HOOK_END_MONO_GRAPHIC, tag_hook),
     ];
     for &(code, f) in hooks {
         let hook = EB_Hook { code: code as c_int, function: Some(f) };
@@ -143,16 +172,35 @@ unsafe extern "C" fn tag_hook(
         EB_HOOK_END_SUPERSCRIPT => "</sup>",
         EB_HOOK_BEGIN_KEYWORD => "<span class=\"kw\">",
         EB_HOOK_END_KEYWORD => "</span>",
-        EB_HOOK_BEGIN_REFERENCE => {
+        EB_HOOK_BEGIN_REFERENCE | EB_HOOK_BEGIN_CANDIDATE => {
             r.refs.push(None);
             write(book, &format!("<a data-ref=\"{}\">", r.refs.len() - 1));
             return 0;
         }
-        EB_HOOK_END_REFERENCE => {
+        EB_HOOK_END_REFERENCE | EB_HOOK_END_CANDIDATE_GROUP => {
             if let Some(last) = r.refs.last_mut() {
                 *last = Some(Pos { page: *argv.add(1) as i32, offset: *argv.add(2) as i32 });
             }
             "</a>"
+        }
+        EB_HOOK_END_CANDIDATE_LEAF => "</a>",
+        EB_HOOK_BEGIN_COLOR_BMP | EB_HOOK_BEGIN_IN_COLOR_BMP | EB_HOOK_BEGIN_COLOR_JPEG
+        | EB_HOOK_BEGIN_IN_COLOR_JPEG => {
+            let pos = Pos { page: *argv.add(2) as i32, offset: *argv.add(3) as i32 };
+            let jpeg = matches!(hook as u32, EB_HOOK_BEGIN_COLOR_JPEG | EB_HOOK_BEGIN_IN_COLOR_JPEG);
+            r.graphic(book, Graphic::Color { pos, jpeg });
+            return 0;
+        }
+        EB_HOOK_BEGIN_MONO_GRAPHIC => {
+            r.mono = Some((*argv.add(3) as i32, *argv.add(2) as i32));
+            return 0;
+        }
+        EB_HOOK_END_MONO_GRAPHIC => {
+            if let Some((width, height)) = r.mono.take().filter(|&(w, h)| w > 0 && h > 0) {
+                let pos = Pos { page: *argv.add(1) as i32, offset: *argv.add(2) as i32 };
+                r.graphic(book, Graphic::Mono { pos, width, height });
+            }
+            return 0;
         }
         _ => "",
     };

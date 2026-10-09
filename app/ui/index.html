@@ -9,16 +9,19 @@
 <header>
   <div id="dicts"></div>
   <button id="font">Font…</button>
-  <button id="folder" title="Choose dictionary folder">Folder…</button>
+  <button id="folder">Folders…</button>
 </header>
 <main>
   <section id="side">
     <div id="modes">
       <button data-mode="Prefix">Prefix</button>
       <button data-mode="Suffix">Suffix</button>
-      <button data-mode="Exact">Exact</button>
+      <button id="menu">Menu</button>
     </div>
-    <form id="form"><input id="query" autocomplete="off" spellcheck="false"><button>Search</button></form>
+    <form id="form">
+      <input id="query" autocomplete="off" spellcheck="false"><button type="button" id="historyButton" title="History">▼</button><button>Search</button>
+      <ul id="history" hidden></ul>
+    </form>
     <div id="count"></div>
     <ul id="hits"></ul>
   </section>
@@ -26,6 +29,19 @@
   <section id="text"></section>
 </main>
 <footer id="status"></footer>
+<dialog id="folders">
+  <form method="dialog">
+    <h3>Dictionary folders</h3>
+    <select id="folderList" size="8"></select>
+    <div class="buttons">
+      <button type="button" id="folderAdd">Add…</button>
+      <button type="button" id="folderRemove">Remove</button>
+      <span class="spacer"></span>
+      <button type="button" id="foldersCancel">Cancel</button>
+      <button value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="fonts">
   <form method="dialog">
     <h3>Fonts</h3>

@@ -7,12 +7,13 @@ use ddlin_core::{Dir, Library, Mode, Pos};
 
 fn lib() -> &'static Library {
     static LIB: OnceLock<Library> = OnceLock::new();
-    LIB.get_or_init(|| {
-        let root = std::env::var_os("DDLIN_TEST_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join("opt/EPWING"));
-        Library::open(&root)
-    })
+    LIB.get_or_init(|| Library::open(&[root()]))
+}
+
+fn root() -> PathBuf {
+    std::env::var_os("DDLIN_TEST_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join("opt/EPWING"))
 }
 
 fn dict(title: &str) -> usize {
@@ -31,8 +32,18 @@ fn pos_of(title: &str, query: &str) -> Pos {
 
 #[test]
 fn lists_all_subbooks_and_skips_non_books() {
-    // EBX1100: 8, S-I-Dic97: 10, epwing: 1, lvt-out: 1; dd266 is not a book.
-    assert_eq!(lib().dicts().len(), 20);
+    // EBX1100: 8, S-I-Dic97: 10, epwing: 1; dd266 is not a book.
+    assert_eq!(lib().dicts().len(), 19);
+}
+
+#[test]
+fn opens_book_folders_in_order_once() {
+    let r = root();
+    let lib = Library::open(&[r.join("S-I-Dic97"), r.join("EBX1100"), r.join("S-I-Dic97"), r.clone()]);
+    // S-I-Dic97 (10), EBX1100 (8), then the rest of the parent folder (epwing: 1).
+    assert_eq!(lib.dicts().len(), 19);
+    assert_eq!(lib.dicts()[0].title, "広辞苑　第四版");
+    assert_eq!(lib.dicts()[10].title, "三省堂のしゃべる英和辞典");
 }
 
 #[test]
@@ -163,4 +174,34 @@ fn edges_of_dictionary() {
 fn ebxa_japanese_query() {
     let h = headings("しゃべるクラウン和英辞典", "いぬ", Mode::Exact);
     assert!(h.iter().any(|s| s.contains("犬")), "{h:?}");
+}
+
+#[test]
+fn menu_items_are_links() {
+    let id = dict("付属資料");
+    assert!(lib().dicts()[id].menu);
+    let pos = lib().menu(id).unwrap().unwrap();
+    let seg = lib().read_segment(id, pos, Dir::Forward).unwrap();
+    assert!(seg.html.contains("\">１．凡例</a>"), "{}", seg.html);
+    assert!(!lib().dicts()[dict("取扱説明")].menu);
+}
+
+#[test]
+fn graphics_are_images() {
+    let id = dict(KOJIEN);
+    // A colour photo (吉野源三郎) and a monochrome drawing (アオジ) from the menu.
+    let photo = lib().read_segment(id, Pos { page: 17751, offset: 818 }, Dir::Forward).unwrap();
+    assert!(photo.html.contains("<img class=\"graphic\" src=\"data:image/bmp;base64,Qk"));
+    let drawing = lib().read_segment(id, Pos { page: 17682, offset: 1682 }, Dir::Forward).unwrap();
+    assert!(drawing.html.contains("アオジ<img class=\"graphic\" src=\"data:image/bmp;base64,Qk"));
+}
+
+#[test]
+fn headings_have_no_graphics() {
+    // 漢字源 headings carry a large glyph graphic; only the text pane shows it.
+    let hits = lib().search(dict("漢字源"), "いぬ", Mode::Prefix).unwrap();
+    let inu = hits.iter().find(|h| h.heading.contains("【犬】")).unwrap();
+    assert!(!inu.heading.contains("<img"), "{}", inu.heading);
+    let seg = lib().read_segment(dict("漢字源"), inu.pos, Dir::Forward).unwrap();
+    assert!(seg.html.contains("<img class=\"graphic\""));
 }

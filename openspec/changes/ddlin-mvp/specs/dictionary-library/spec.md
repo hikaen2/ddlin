@@ -5,21 +5,29 @@
 ## ADDED Requirements
 
 ### Requirement: Dictionary folder
-システムは利用者が指定した辞書フォルダを保存し、次回起動時にも使用しなければならない (SHALL)。
+システムは利用者が指定した複数の辞書フォルダを保存し、次回起動時にも使用しなければならない (SHALL)。利用者はフォルダを追加・削除できなければならない (SHALL)。
 
-#### Scenario: Folder is remembered
-- **WHEN** 利用者が辞書フォルダ `~/opt/EPWING` を指定してアプリを再起動する
-- **THEN** 再起動後も同じフォルダの辞書が一覧に表示される
+#### Scenario: Folders are remembered
+- **WHEN** 利用者が辞書フォルダ `~/opt/EPWING/EBX1100/` と `~/opt/EPWING/S-I-Dic97/` を指定してアプリを再起動する
+- **THEN** 再起動後も両方のフォルダの辞書が一覧に表示される
+
+#### Scenario: Removing a folder
+- **WHEN** 利用者が辞書フォルダの一覧から `~/opt/EPWING/S-I-Dic97/` を削除する
+- **THEN** そのフォルダの辞書はツールバーから消え、残りのフォルダの辞書だけが表示される
 
 #### Scenario: No folder configured
 - **WHEN** 辞書フォルダが未設定の状態で起動する
-- **THEN** フォルダを選ぶよう英語で促す表示が出る
+- **THEN** フォルダを追加するよう英語で促す表示が出る
 
 ### Requirement: Dictionary discovery
-システムは辞書フォルダ直下の各ディレクトリを EPWING / EBXA 書籍として開き、そのすべての副本を辞書として登録しなければならない (SHALL)。開けないディレクトリは無視しなければならない (SHALL)。
+システムは各辞書フォルダを、指定された順に EPWING / EBXA 書籍として開き、そのすべての副本を辞書として登録しなければならない (SHALL)。書籍として開けないフォルダは、その直下の各ディレクトリを書籍として開かなければならない (SHALL)。開けないディレクトリは無視し、同じ書籍は 1 度だけ登録しなければならない (SHALL)。
 
-#### Scenario: Multiple books and subbooks
-- **WHEN** 辞書フォルダに `EBX1100` (8 副本), `S-I-Dic97` (10 副本), `epwing` (1 副本) がある
+#### Scenario: Book folders
+- **WHEN** 辞書フォルダとして `EBX1100` (8 副本) と `S-I-Dic97` (10 副本) を指定する
+- **THEN** 18 個の辞書がこの順に登録される
+
+#### Scenario: Folder of books
+- **WHEN** 辞書フォルダの直下に `EBX1100` (8 副本), `S-I-Dic97` (10 副本), `epwing` (1 副本) がある
 - **THEN** 19 個の辞書が登録される
 
 #### Scenario: Non-dictionary directory

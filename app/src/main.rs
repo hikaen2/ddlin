@@ -10,12 +10,17 @@ use tauri_plugin_dialog::DialogExt;
 
 #[derive(Default)]
 struct AppState {
-    root: RwLock<Option<PathBuf>>,
+    folders: RwLock<Vec<PathBuf>>,
     lib: RwLock<Option<Arc<Library>>>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 struct Config {
+    /// Dictionary folders: each is a book or a folder of books.
+    #[serde(default)]
+    folders: Vec<PathBuf>,
+    /// The single folder used by earlier versions; read once into `folders`.
+    #[serde(default, skip_serializing)]
     root: Option<PathBuf>,
     #[serde(default)]
     fonts: Fonts,
@@ -51,7 +56,7 @@ struct Font {
 
 #[derive(Serialize)]
 struct Overview {
-    root: Option<String>,
+    folders: Vec<String>,
     dicts: Vec<Dict>,
 }
 
@@ -60,10 +65,14 @@ fn config_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn load_config(app: &AppHandle) -> Config {
-    config_path(app)
+    let mut config: Config = config_path(app)
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if config.folders.is_empty() {
+        config.folders.extend(config.root.take());
+    }
+    config
 }
 
 fn save_config(app: &AppHandle, config: &Config) -> Result<(), String> {
@@ -72,15 +81,15 @@ fn save_config(app: &AppHandle, config: &Config) -> Result<(), String> {
     std::fs::write(path, serde_json::to_vec_pretty(config).unwrap()).map_err(|e| e.to_string())
 }
 
-fn open_root(state: &AppState, root: Option<PathBuf>) {
-    let lib = root.as_deref().map(|r| Arc::new(Library::open(r)));
-    *state.root.write().unwrap() = root;
-    *state.lib.write().unwrap() = lib;
+fn open_folders(state: &AppState, folders: Vec<PathBuf>) {
+    let lib = Arc::new(Library::open(&folders));
+    *state.folders.write().unwrap() = folders;
+    *state.lib.write().unwrap() = Some(lib);
 }
 
 fn overview(state: &AppState) -> Overview {
     Overview {
-        root: state.root.read().unwrap().as_ref().map(|p| p.display().to_string()),
+        folders: state.folders.read().unwrap().iter().map(|p| p.display().to_string()).collect(),
         dicts: state.lib.read().unwrap().as_ref().map(|l| l.dicts().to_vec()).unwrap_or_default(),
     }
 }
@@ -94,13 +103,22 @@ async fn get_overview(state: State<'_, AppState>) -> Result<Overview, String> {
     Ok(overview(&state))
 }
 
+/// Lets the user pick folders to add; returns them without saving.
 #[tauri::command]
-async fn choose_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Overview, String> {
-    if let Some(dir) = app.dialog().file().set_title("Choose dictionary folder").blocking_pick_folder() {
-        let root = dir.into_path().map_err(|e| e.to_string())?;
-        save_config(&app, &Config { root: Some(root.clone()), ..load_config(&app) })?;
-        open_root(&state, Some(root));
-    }
+async fn pick_folders(app: AppHandle) -> Result<Vec<String>, String> {
+    let dirs = app.dialog().file().set_title("Add dictionary folders").blocking_pick_folders();
+    Ok(dirs
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|d| d.into_path().ok())
+        .map(|p| p.display().to_string())
+        .collect())
+}
+
+#[tauri::command]
+async fn set_folders(app: AppHandle, state: State<'_, AppState>, folders: Vec<PathBuf>) -> Result<Overview, String> {
+    save_config(&app, &Config { folders: folders.clone(), ..load_config(&app) })?;
+    open_folders(&state, folders);
     Ok(overview(&state))
 }
 
@@ -132,6 +150,11 @@ async fn search(state: State<'_, AppState>, id: usize, query: String, mode: Mode
 }
 
 #[tauri::command]
+async fn menu(state: State<'_, AppState>, id: usize) -> Result<Option<Pos>, String> {
+    lib(&state)?.menu(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn read_segment(state: State<'_, AppState>, id: usize, pos: Pos, dir: Dir) -> Result<Segment, String> {
     lib(&state)?.read_segment(id, pos, dir).map_err(|e| e.to_string())
 }
@@ -142,7 +165,7 @@ fn main() {
         .manage(AppState::default())
         .setup(|app| {
             let config = load_config(app.handle());
-            open_root(&app.state::<AppState>(), config.root);
+            open_folders(&app.state::<AppState>(), config.folders);
             #[cfg(target_os = "linux")]
             app.get_webview_window("main").unwrap().with_webview(|webview| {
                 use webkit2gtk::{SettingsExt, WebViewExt};
@@ -152,7 +175,7 @@ fn main() {
             })?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_overview, choose_folder, get_fonts, set_fonts, font_families, search, read_segment])
+        .invoke_handler(tauri::generate_handler![get_overview, pick_folders, set_folders, get_fonts, set_fonts, font_families, search, menu, read_segment])
         .run(tauri::generate_context!())
         .expect("error while running ddlin");
 }

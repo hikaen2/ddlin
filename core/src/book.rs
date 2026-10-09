@@ -6,8 +6,10 @@ use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::sync::Once;
 
+use base64::Engine;
+
 use crate::ffi::*;
-use crate::render::{self, Render};
+use crate::render::{self, Graphic, Render};
 use crate::{Error, Pos};
 
 static INIT: Once = Once::new();
@@ -95,6 +97,12 @@ impl Book {
     }
     pub fn has_exactword(&mut self) -> bool {
         unsafe { eb_have_exactword_search(&mut *self.raw) != 0 }
+    }
+
+    /// Start of the menu of the current subbook, if it has one.
+    pub fn menu(&mut self) -> Option<Pos> {
+        let mut p = EB_Position { page: 0, offset: 0 };
+        unsafe { (eb_menu(&mut *self.raw, &mut p) == 0).then(|| p.into()) }
     }
 
     /// Runs a word search on the current subbook and returns all (heading, text) positions.
@@ -202,7 +210,57 @@ impl Book {
                 break;
             }
         }
-        Ok(r.finish(String::from_utf8_lossy(&out).into_owned()))
+        let html = r.finish(String::from_utf8_lossy(&out).into_owned());
+        Ok(self.insert_graphics(r, html))
+    }
+
+    /// Replaces graphic placeholders with data URIs, or drops them if the
+    /// graphic cannot be read.
+    fn insert_graphics(&mut self, r: &mut Render, html: String) -> String {
+        let graphics = std::mem::take(&mut r.graphics);
+        let mut html = html;
+        for (n, g) in graphics.iter().enumerate() {
+            let placeholder = format!("<img class=\"graphic\" data-graphic=\"{n}\">");
+            let img = self.read_graphic(g).map(|(mime, bytes)| {
+                format!(
+                    "<img class=\"graphic\" src=\"data:{mime};base64,{}\">",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                )
+            });
+            html = html.replacen(&placeholder, &img.unwrap_or_default(), 1);
+        }
+        html
+    }
+
+    fn read_graphic(&mut self, g: &Graphic) -> Option<(&'static str, Vec<u8>)> {
+        let (code, mime) = unsafe {
+            match *g {
+                Graphic::Color { pos, jpeg } => (
+                    eb_set_binary_color_graphic(&mut *self.raw, &pos.into()),
+                    if jpeg { "image/jpeg" } else { "image/bmp" },
+                ),
+                Graphic::Mono { pos, width, height } => {
+                    (eb_set_binary_mono_graphic(&mut *self.raw, &pos.into(), width, height), "image/bmp")
+                }
+            }
+        };
+        if code != 0 {
+            return None;
+        }
+        let mut data = vec![];
+        let mut buf = [0u8; 8192];
+        loop {
+            let mut len: isize = 0;
+            let code = unsafe {
+                eb_read_binary(&mut *self.raw, buf.len(), buf.as_mut_ptr() as *mut c_char, &mut len)
+            };
+            if code != 0 || len <= 0 {
+                break;
+            }
+            data.extend_from_slice(&buf[..len as usize]);
+        }
+        unsafe { eb_unset_binary(&mut *self.raw) };
+        (!data.is_empty()).then_some((mime, data))
     }
 }
 
