@@ -29,6 +29,16 @@
     "resources": {
       "../THIRD_PARTY_NOTICES": "THIRD_PARTY_NOTICES",
       "../LICENSE": "LICENSE"
+    },
+    "category": "Reference",
+    "shortDescription": "EPWING dictionary viewer",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "ddlin.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "ddlin.desktop"
+      }
     }
   }
 }
