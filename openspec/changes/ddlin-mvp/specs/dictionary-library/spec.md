@@ -27,11 +27,15 @@
 - **THEN** そのディレクトリは無視され、他の辞書は通常どおり登録される
 
 ### Requirement: Dictionary toolbar
-システムは登録した辞書をツールバーに並べ、1 冊だけを選択状態にしなければならない (SHALL)。辞書名は辞書データにある題名を翻訳せずにそのまま表示しなければならない (SHALL)。
+システムは登録した辞書をツールバーに並べ、1 冊だけを選択状態にしなければならない (SHALL)。ツールバーには辞書データにある題名の先頭 3 文字を翻訳せずに表示し、選択中の辞書の題名全体を画面下のステータスバーに表示しなければならない (SHALL)。
 
-#### Scenario: Japanese title shown as is
+#### Scenario: Short title on toolbar
 - **WHEN** 広辞苑 第四版の副本が登録されている
-- **THEN** ツールバーに「広辞苑　第四版」と表示される
+- **THEN** ツールバーに「広辞苑」と表示される
+
+#### Scenario: Full title in status bar
+- **WHEN** 利用者がツールバーで「広辞苑」を選ぶ
+- **THEN** ステータスバーに「広辞苑　第四版」と表示される
 
 #### Scenario: Selecting a dictionary
 - **WHEN** 利用者がツールバーで辞書をクリックする

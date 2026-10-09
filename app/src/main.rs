@@ -17,6 +17,36 @@ struct AppState {
 #[derive(Serialize, Deserialize, Default)]
 struct Config {
     root: Option<PathBuf>,
+    #[serde(default)]
+    fonts: Fonts,
+}
+
+/// Fonts for the UI, the headword list and the text pane. An empty family
+/// means the system default; a size of 0 means the default size.
+#[derive(Serialize, Deserialize, Clone)]
+struct Fonts {
+    #[serde(default)]
+    ui: Font,
+    list: Font,
+    text: Font,
+    #[serde(default = "yes")]
+    antialias: bool,
+}
+
+impl Default for Fonts {
+    fn default() -> Self {
+        Fonts { ui: Font::default(), list: Font::default(), text: Font::default(), antialias: true }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct Font {
+    family: String,
+    size: u32,
 }
 
 #[derive(Serialize)]
@@ -68,10 +98,32 @@ async fn get_overview(state: State<'_, AppState>) -> Result<Overview, String> {
 async fn choose_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Overview, String> {
     if let Some(dir) = app.dialog().file().set_title("Choose dictionary folder").blocking_pick_folder() {
         let root = dir.into_path().map_err(|e| e.to_string())?;
-        save_config(&app, &Config { root: Some(root.clone()) })?;
+        save_config(&app, &Config { root: Some(root.clone()), ..load_config(&app) })?;
         open_root(&state, Some(root));
     }
     Ok(overview(&state))
+}
+
+#[tauri::command]
+async fn get_fonts(app: AppHandle) -> Result<Fonts, String> {
+    Ok(load_config(&app).fonts)
+}
+
+#[tauri::command]
+async fn set_fonts(app: AppHandle, fonts: Fonts) -> Result<(), String> {
+    save_config(&app, &Config { fonts, ..load_config(&app) })
+}
+
+/// Font families installed on the system, sorted.
+#[tauri::command]
+async fn font_families() -> Result<Vec<String>, String> {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut names: Vec<String> =
+        db.faces().filter_map(|f| f.families.first().map(|(name, _)| name.clone())).collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 #[tauri::command]
@@ -91,9 +143,16 @@ fn main() {
         .setup(|app| {
             let config = load_config(app.handle());
             open_root(&app.state::<AppState>(), config.root);
+            #[cfg(target_os = "linux")]
+            app.get_webview_window("main").unwrap().with_webview(|webview| {
+                use webkit2gtk::{SettingsExt, WebViewExt};
+                if let Some(settings) = webview.inner().settings() {
+                    settings.set_enable_smooth_scrolling(false);
+                }
+            })?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_overview, choose_folder, search, read_segment])
+        .invoke_handler(tauri::generate_handler![get_overview, choose_folder, get_fonts, set_fonts, font_families, search, read_segment])
         .run(tauri::generate_context!())
         .expect("error while running ddlin");
 }

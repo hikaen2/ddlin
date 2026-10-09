@@ -8,6 +8,7 @@
 <body>
 <header>
   <div id="dicts"></div>
+  <button id="font">Font…</button>
   <button id="folder" title="Choose dictionary folder">Folder…</button>
 </header>
 <main>
@@ -21,8 +22,32 @@
     <div id="count"></div>
     <ul id="hits"></ul>
   </section>
+  <div id="splitter"></div>
   <section id="text"></section>
 </main>
+<footer id="status"></footer>
+<dialog id="fonts">
+  <form method="dialog">
+    <h3>Fonts</h3>
+    <div class="grid">
+      <label for="uiFamily">UI</label>
+      <select id="uiFamily"></select>
+      <input id="uiSize" type="number" min="6" max="72">
+      <label for="listFamily">Headword list</label>
+      <select id="listFamily"></select>
+      <input id="listSize" type="number" min="6" max="72">
+      <label for="textFamily">Text</label>
+      <select id="textFamily"></select>
+      <input id="textSize" type="number" min="6" max="72">
+      <label></label>
+      <label><input id="antialias" type="checkbox"> Antialiasing</label>
+    </div>
+    <div class="buttons">
+      <button type="button" id="fontsCancel">Cancel</button>
+      <button value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
 <script src="main.js"></script>
 </body>
 </html>
