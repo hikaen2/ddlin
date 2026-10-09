@@ -99,6 +99,12 @@ impl Book {
         unsafe { eb_have_exactword_search(&mut *self.raw) != 0 }
     }
 
+    /// Start of the main text of the current subbook, if it has one.
+    pub fn text_start(&mut self) -> Option<Pos> {
+        let mut p = EB_Position { page: 0, offset: 0 };
+        unsafe { (eb_text(&mut *self.raw, &mut p) == 0).then(|| p.into()) }
+    }
+
     /// Start of the menu of the current subbook, if it has one.
     pub fn menu(&mut self) -> Option<Pos> {
         let mut p = EB_Position { page: 0, offset: 0 };
@@ -200,7 +206,8 @@ impl Book {
                     std::ptr::null_mut(),
                     &mut *self.hookset,
                     r as *mut Render as *mut std::ffi::c_void,
-                    buf.len(),
+                    // libeb writes a terminating NUL after the text.
+                    buf.len() - 1,
                     buf.as_mut_ptr() as *mut c_char,
                     &mut len,
                 ))?;

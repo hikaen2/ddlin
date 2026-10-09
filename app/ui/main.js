@@ -48,6 +48,7 @@ function savedDict() {
 }
 
 function select(d) {
+  stopFullText();
   dict = d;
   try {
     if (d) localStorage.setItem("dict", JSON.stringify({ id: d.id, title: d.title }));
@@ -57,7 +58,7 @@ function select(d) {
   for (const b of modeButtons()) b.disabled = !d || !d[b.dataset.mode.toLowerCase()];
   $("menu").disabled = !d || !d.menu;
   if (d && !d[mode.toLowerCase()]) {
-    const m = ["Prefix", "Suffix"].find((m) => d[m.toLowerCase()]);
+    const m = ["Prefix", "Suffix", "Full"].find((m) => d[m.toLowerCase()]);
     if (m) mode = m;
   }
   setMode(mode);
@@ -128,9 +129,11 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function search() {
+  stopFullText();
   const query = $("query").value.trim();
   if (!dict || !query || !dict[mode.toLowerCase()]) return;
   remember(query);
+  if (mode === "Full") return fullText(query);
   hits = await invoke("search", { id: dict.id, query, mode });
   const ul = $("hits");
   ul.innerHTML = hits.map((h, i) => `<li data-i="${i}">${h.heading}</li>`).join("");
@@ -142,6 +145,61 @@ async function search() {
     return;
   }
   pick(0);
+}
+
+// Full-text search reads the text in chunks; a newer search or Stop
+// invalidates the running one.
+const FULL_MAX = 1000;
+let fullToken = 0;
+let fullRunning = false;
+
+function setFullRunning(on) {
+  fullRunning = on;
+  $("searchButton").textContent = on ? "Stop" : "Search";
+}
+
+function stopFullText() {
+  fullToken++;
+  if (fullRunning) {
+    setFullRunning(false);
+    $("count").textContent = `${hits.length} results (stopped)`;
+  }
+}
+
+async function fullText(query) {
+  const token = ++fullToken;
+  const ul = $("hits");
+  hits = [];
+  current = -1;
+  ul.innerHTML = "";
+  ul.scrollTop = 0;
+  message(text, "");
+  $("count").textContent = "Searching…";
+  setFullRunning(true);
+  let from = null;
+  try {
+    for (;;) {
+      const chunk = await invoke("full_text", { id: dict.id, query, from });
+      if (token !== fullToken) return;
+      const found = chunk.hits.slice(0, FULL_MAX - hits.length);
+      ul.insertAdjacentHTML("beforeend", found.map((h, i) => `<li data-i="${hits.length + i}">${h.heading}</li>`).join(""));
+      hits.push(...found);
+      if (current < 0 && hits.length) pick(0);
+      if (hits.length >= FULL_MAX) {
+        $("count").textContent = `${FULL_MAX}+ results (stopped)`;
+        break;
+      }
+      if (!chunk.next) {
+        $("count").textContent = hits.length ? `${hits.length} results` : "";
+        if (!hits.length) message(text, "No results");
+        break;
+      }
+      $("count").textContent = `${hits.length} results, searching…`;
+      from = chunk.next;
+    }
+  } finally {
+    if (token === fullToken) setFullRunning(false);
+  }
 }
 
 function pick(i) {
@@ -280,7 +338,8 @@ $("modes").addEventListener("click", (e) => {
 });
 $("form").addEventListener("submit", (e) => {
   e.preventDefault();
-  search();
+  if (fullRunning) stopFullText();
+  else search();
 });
 // Drag the splitter to resize the headword pane; the width is remembered.
 const side = $("side");

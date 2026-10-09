@@ -20,6 +20,8 @@ pub enum Graphic {
 pub struct Render<'a> {
     pub gaiji: &'a mut GaijiCache,
     pub heading: bool,
+    /// Text for matching only: no gaiji or graphics.
+    pub plain: bool,
     refs: Vec<Option<Pos>>,
     /// Graphics written as `<img data-graphic="N">` placeholders.
     pub graphics: Vec<Graphic>,
@@ -29,12 +31,12 @@ pub struct Render<'a> {
 
 impl<'a> Render<'a> {
     pub fn new(gaiji: &'a mut GaijiCache) -> Self {
-        Render { gaiji, heading: false, refs: vec![], graphics: vec![], mono: None }
+        Render { gaiji, heading: false, plain: false, refs: vec![], graphics: vec![], mono: None }
     }
 
     unsafe fn graphic(&mut self, book: *mut EB_Book, g: Graphic) {
         // Headings stay text only, as in DDwin.
-        if self.heading {
+        if self.heading || self.plain {
             return;
         }
         self.graphics.push(g);
@@ -217,6 +219,9 @@ unsafe extern "C" fn gaiji_hook(
     argv: *const c_uint,
 ) -> EB_Error_Code {
     let r = &mut *(container as *mut Render);
+    if r.plain {
+        return 0;
+    }
     let wide = hook as u32 != EB_HOOK_NARROW_FONT;
     let code = *argv;
     let img = r

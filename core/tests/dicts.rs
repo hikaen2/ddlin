@@ -205,3 +205,38 @@ fn headings_have_no_graphics() {
     let seg = lib().read_segment(dict("漢字源"), inu.pos, Dir::Forward).unwrap();
     assert!(seg.html.contains("<img class=\"graphic\""));
 }
+
+#[test]
+fn full_text_finds_words_in_the_text() {
+    let id = dict(KOJIEN);
+    assert!(lib().dicts()[id].full);
+    // A phrase from the body of あさ‐はら【朝腹】, found within the first chunks.
+    let mut from = None;
+    let mut hits = vec![];
+    for _ in 0..20 {
+        let chunk = lib().full_text(id, "空腹をみたすには足りない", from).unwrap();
+        hits.extend(chunk.hits);
+        from = chunk.next;
+        if !hits.is_empty() || from.is_none() {
+            break;
+        }
+    }
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].heading, "<span class=\"kw\">あさ‐はら</span>【<span class=\"kw\">朝腹</span>】");
+}
+
+#[test]
+fn full_text_reaches_the_end() {
+    let id = dict("付属資料");
+    let mut from = None;
+    let mut hits = 0;
+    loop {
+        let chunk = lib().full_text(id, "凡例", from).unwrap();
+        hits += chunk.hits.len();
+        match chunk.next {
+            Some(p) => from = Some(p),
+            None => break,
+        }
+    }
+    assert!(hits > 0);
+}

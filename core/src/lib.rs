@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use book::Book;
 use render::{GaijiCache, Render};
 
+/// Entries read per full-text search call.
+const FULL_TEXT_CHUNK: usize = 2000;
+
 /// Approximate size of one text segment in bytes of text, not counting
 /// markup and gaiji images (DDwin's BufferSize).
 const SEGMENT_SIZE: usize = 8000;
@@ -22,6 +25,7 @@ pub enum Error {
     Eb(i32),
     Path,
     NoDict,
+    NoText,
 }
 
 impl std::fmt::Display for Error {
@@ -30,6 +34,7 @@ impl std::fmt::Display for Error {
             Error::Eb(code) => write!(f, "EB error {code}"),
             Error::Path => write!(f, "invalid path"),
             Error::NoDict => write!(f, "no such dictionary"),
+            Error::NoText => write!(f, "no text"),
         }
     }
 }
@@ -50,6 +55,7 @@ pub struct Dict {
     pub suffix: bool,
     pub exact: bool,
     pub menu: bool,
+    pub full: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -69,6 +75,14 @@ pub enum Dir {
 pub struct Hit {
     pub heading: String,
     pub pos: Pos,
+}
+
+/// Part of a full-text search. `next` is where to continue, or None when
+/// the end of the text is reached.
+#[derive(Debug, Clone, Serialize)]
+pub struct FullText {
+    pub hits: Vec<Hit>,
+    pub next: Option<Pos>,
 }
 
 /// A run of entries. `next` is where to continue reading in the same
@@ -135,10 +149,11 @@ impl Library {
                     continue;
                 }
                 let menu = book.menu().is_some();
-                entries.push((sb, book.title(), book.has_word(), book.has_endword(), book.has_exactword(), menu));
+                let full = book.text_start().is_some();
+                entries.push((sb, book.title(), book.has_word(), book.has_endword(), book.has_exactword(), menu, full));
             }
-            for (sb, title, prefix, suffix, exact, menu) in entries {
-                dicts.push(Dict { id: dicts.len(), title, prefix, suffix, exact, menu });
+            for (sb, title, prefix, suffix, exact, menu, full) in entries {
+                dicts.push(Dict { id: dicts.len(), title, prefix, suffix, exact, menu, full });
                 inner.slots.push(Slot { book: inner.books.len(), subbook: sb, gaiji: GaijiCache::new() });
             }
             inner.books.push(book);
@@ -181,6 +196,39 @@ impl Library {
         })
     }
 
+    /// Searches the text of up to FULL_TEXT_CHUNK entries for `query`,
+    /// starting at `from` or at the start of the text. Matching ignores
+    /// markup and ASCII case. Each hit's heading is the entry's first line.
+    pub fn full_text(&self, id: usize, query: &str, from: Option<Pos>) -> Result<FullText, Error> {
+        let needle = query.to_lowercase();
+        if needle.is_empty() {
+            return Ok(FullText { hits: vec![], next: None });
+        }
+        self.with(id, |book, cache| {
+            let mut cur = match from {
+                Some(p) => p,
+                None => book.text_start().ok_or(Error::NoText)?,
+            };
+            let mut hits = vec![];
+            for _ in 0..FULL_TEXT_CHUNK {
+                book.seek(cur)?;
+                let mut r = Render::new(cache);
+                r.plain = true;
+                let text = plain_text(&book.read_entry(&mut r)?);
+                if text.to_lowercase().contains(&needle) {
+                    book.seek(cur)?;
+                    let html = book.read_entry(&mut Render::new(cache))?;
+                    hits.push(Hit { heading: first_line(&html).to_string(), pos: cur });
+                }
+                if !book.forward()? {
+                    return Ok(FullText { hits, next: None });
+                }
+                cur = book.tell()?;
+            }
+            Ok(FullText { hits, next: Some(cur) })
+        })
+    }
+
     /// Start of the dictionary's menu, if it has one.
     pub fn menu(&self, id: usize) -> Result<Option<Pos>, Error> {
         self.with(id, |book, _| Ok(book.menu()))
@@ -213,6 +261,27 @@ impl Drop for Library {
 fn entry_html(book: &mut Book, r: &mut Render, pos: Pos) -> Result<String, Error> {
     book.seek(pos)?;
     Ok(format!("<div class=\"entry\">{}</div>", book.read_entry(r)?))
+}
+
+/// The text outside tags, with line breaks as newlines.
+fn plain_text(html: &str) -> String {
+    let html = html.replace("<br>", "\n");
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+/// The first line of an entry's HTML.
+fn first_line(html: &str) -> &str {
+    html.split("<br>").next().unwrap_or(html)
 }
 
 /// Length of the text outside tags.

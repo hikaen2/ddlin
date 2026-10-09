@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use ddlin_core::{Dict, Dir, Hit, Library, Mode, Pos, Segment};
+use ddlin_core::{Dict, Dir, FullText, Hit, Library, Mode, Pos, Segment};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -150,6 +150,11 @@ async fn search(state: State<'_, AppState>, id: usize, query: String, mode: Mode
 }
 
 #[tauri::command]
+async fn full_text(state: State<'_, AppState>, id: usize, query: String, from: Option<Pos>) -> Result<FullText, String> {
+    lib(&state)?.full_text(id, &query, from).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn menu(state: State<'_, AppState>, id: usize) -> Result<Option<Pos>, String> {
     lib(&state)?.menu(id).map_err(|e| e.to_string())
 }
@@ -175,7 +180,7 @@ fn main() {
             })?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_overview, pick_folders, set_folders, get_fonts, set_fonts, font_families, search, menu, read_segment])
+        .invoke_handler(tauri::generate_handler![get_overview, pick_folders, set_folders, get_fonts, set_fonts, font_families, search, full_text, menu, read_segment])
         .run(tauri::generate_context!())
         .expect("error while running ddlin");
 }

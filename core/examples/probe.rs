@@ -1,4 +1,4 @@
-//! Debug CLI: probe <root> [<dict-title-substring> <prefix|suffix|exact|pos> <query|page:offset>]
+//! Debug CLI: probe <root> [<dict-title-substring> <prefix|suffix|exact|pos|menu|full> <query|page:offset>]
 use ddlin_core::{Dir, Library, Mode, Pos};
 
 fn main() {
@@ -11,6 +11,25 @@ fn main() {
         return;
     }
     let dict = lib.dicts().iter().find(|d| d.title.contains(&args[1])).expect("dict");
+    if args[2] == "full" {
+        let t = std::time::Instant::now();
+        let (mut from, mut calls, mut hits) = (None, 0, vec![]);
+        loop {
+            let chunk = lib.full_text(dict.id, &args[3], from).unwrap();
+            calls += 1;
+            hits.extend(chunk.hits);
+            match chunk.next {
+                Some(p) => from = Some(p),
+                None => break,
+            }
+        }
+        eprintln!("{} hits, {calls} calls in {:?}", hits.len(), t.elapsed());
+        eprintln!("first={:?} last={:?}", hits.first().map(|h| h.pos), hits.last().map(|h| h.pos));
+        for h in hits.iter().take(10) {
+            println!("{:?} {}", h.pos, h.heading);
+        }
+        return;
+    }
     if args[2] == "menu" {
         let pos = lib.menu(dict.id).unwrap().expect("no menu");
         let seg = lib.read_segment(dict.id, pos, Dir::Forward).unwrap();
