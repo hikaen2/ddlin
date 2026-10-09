@@ -175,7 +175,8 @@ impl Library {
         f(book, &mut slot.gaiji)
     }
 
-    /// Returns every heading that matches, without duplicates of the same text position.
+    /// Returns every heading that matches, in the order the entries are
+    /// stored in the text, without duplicates of the same text position.
     pub fn search(&self, id: usize, query: &str, mode: Mode) -> Result<Vec<Hit>, Error> {
         self.with(id, |book, cache| {
             let word = encode_query(book, query);
@@ -184,15 +185,19 @@ impl Library {
                 Mode::Suffix => ffi::eb_search_endword,
                 Mode::Exact => ffi::eb_search_exactword,
             };
-            let mut seen = std::collections::HashSet::new();
-            let mut hits = vec![];
+            // Storage order: by position in the text, as DDwin's 格納順.
+            let mut found = book.search(&word, f)?;
+            found.sort_by_key(|&(_, text)| (text.page, text.offset));
+            found.dedup_by_key(|&mut (_, text)| text);
             let mut r = Render::new(cache);
-            for (heading, text) in book.search(&word, f)? {
-                if seen.insert(text) {
-                    hits.push(Hit { heading: book.heading(heading, &mut r)?, pos: text });
-                }
-            }
-            Ok(hits)
+            let hits = found
+                .into_iter()
+                .map(|(heading, text)| Ok(Hit { heading: book.heading(heading, &mut r)?, pos: text }))
+                .collect::<Result<Vec<_>, Error>>()?;
+            Ok(match kana_key(query) {
+                Some(key) => hits.into_iter().filter(|h| reading_matches(&h.heading, &key, mode)).collect(),
+                None => hits,
+            })
         })
     }
 
@@ -261,6 +266,45 @@ impl Drop for Library {
 fn entry_html(book: &mut Book, r: &mut Render, pos: Pos) -> Result<String, Error> {
     book.seek(pos)?;
     Ok(format!("<div class=\"entry\">{}</div>", book.read_entry(r)?))
+}
+
+/// `s` with katakana as hiragana and without ‐・ー and spaces.
+fn normalize_kana(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, '‐' | '・' | 'ー' | '-' | ' ' | '\u{3000}'))
+        .map(|c| match c {
+            'ァ'..='ヶ' => char::from_u32(c as u32 - 0x60).unwrap(),
+            _ => c,
+        })
+        .collect()
+}
+
+fn is_kana(c: char) -> bool {
+    ('ぁ'..='ゖ').contains(&c)
+}
+
+/// The query as normalized kana, or None if it is not all kana.
+fn kana_key(query: &str) -> Option<String> {
+    let key = normalize_kana(query);
+    (!key.is_empty() && key.chars().all(is_kana)).then_some(key)
+}
+
+/// Kana indexes ignore voicing marks for many entries, so "らが" also
+/// finds "らか". Compare the heading (before 【) with the query from the
+/// matched end, as DDwin does: kana must be equal, and a non-kana
+/// character such as a kanji ends the comparison as a match.
+fn reading_matches(heading: &str, key: &str, mode: Mode) -> bool {
+    let text = plain_text(heading);
+    let reading = normalize_kana(text.split('【').next().unwrap_or(""));
+    let agree = |(h, k): (char, char)| if is_kana(h) { (h == k).then_some(true) } else { Some(false) };
+    let first_difference = match mode {
+        Mode::Prefix => reading.chars().zip(key.chars()).map(agree).find(|r| r != &Some(true)),
+        Mode::Suffix => reading.chars().rev().zip(key.chars().rev()).map(agree).find(|r| r != &Some(true)),
+        Mode::Exact => return !reading.chars().all(is_kana) || reading == key,
+    };
+    // None: all compared kana are equal; Some(Some(false)): stopped at a
+    // non-kana character; Some(None): a kana differs.
+    first_difference != Some(None)
 }
 
 /// The text outside tags, with line breaks as newlines.

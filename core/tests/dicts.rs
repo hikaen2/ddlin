@@ -82,6 +82,14 @@ fn suffix_search() {
 }
 
 #[test]
+fn results_are_in_storage_order() {
+    let hits = lib().search(dict(KOJIEN), "やま", Mode::Suffix).unwrap();
+    assert!(hits.windows(2).all(|w| (w[0].pos.page, w[0].pos.offset) < (w[1].pos.page, w[1].pos.offset)));
+    // 広辞苑 stores entries in kana order, so the first one starts with あ.
+    assert!(hits[0].heading.contains("あい‐の‐つちやま"), "{}", hits[0].heading);
+}
+
+#[test]
 fn ebxa_dictionary_search() {
     let h = headings("三省堂のしゃべる英和辞典", "dog", Mode::Prefix);
     assert!(h.iter().any(|s| s.starts_with("dog")));
@@ -239,4 +247,16 @@ fn full_text_reaches_the_end() {
         }
     }
     assert!(hits > 0);
+}
+
+#[test]
+fn kana_search_respects_voicing_marks() {
+    // The kana index alone also finds らか for らが, and とうふく for どうぶ.
+    let h = headings(KOJIEN, "らが", Mode::Suffix);
+    assert_eq!(h.len(), 16);
+    assert!(h.iter().any(|s| s.contains("白髪")));
+    assert!(!h.iter().any(|s| s.contains("赤らか") || s.contains("明らか")));
+    assert_eq!(headings(KOJIEN, "どうぶ", Mode::Prefix).len(), 44);
+    // Headings ending in a kanji are kept, as in DDwin.
+    assert!(headings(KOJIEN, "やま", Mode::Suffix).iter().any(|s| s.contains("有為の奥山")));
 }
