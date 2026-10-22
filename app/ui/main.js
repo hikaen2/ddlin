@@ -30,7 +30,7 @@ function render(overview) {
   current = -1;
   $("count").textContent = "";
   folders = overview.folders;
-  if (!folders.length) message(text, "Add dictionary folders to start (Folders…).");
+  if (!folders.length) message(text, "Add dictionary folders to start (☰ → Dictionaries...).");
   else if (!dicts.length) message(text, "No dictionaries found in the dictionary folders.");
   else message(text, "");
   select(savedDict() || dicts.find((d) => d.prefix) || dicts[0] || null);
@@ -123,9 +123,10 @@ $("history").addEventListener("click", (e) => {
 });
 document.addEventListener("click", (e) => {
   if (!e.target.closest("#history, #historyButton")) $("history").hidden = true;
+  if (!e.target.closest("#menuWrap")) $("appMenu").hidden = true;
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") $("history").hidden = true;
+  if (e.key === "Escape") $("history").hidden = $("appMenu").hidden = true;
 });
 
 async function search() {
@@ -203,7 +204,7 @@ async function fullText(query) {
 }
 
 function pick(i) {
-  if (i < 0 || i >= hits.length || i === current) return;
+  if (i < 0 || i >= hits.length) return;
   const ul = $("hits");
   ul.children[current]?.classList.remove("on");
   ul.children[i].classList.add("on");
@@ -378,6 +379,10 @@ function applyFonts(f) {
   document.documentElement.classList.toggle("no-antialias", !f.antialias);
 }
 
+// The ☰ menu; choosing an item closes it.
+$("menuButton").onclick = () => ($("appMenu").hidden = !$("appMenu").hidden);
+$("appMenu").addEventListener("click", () => ($("appMenu").hidden = true));
+
 $("font").onclick = async () => {
   families ??= await invoke("font_families");
   for (const k of ["ui", "list", "text"]) {
@@ -433,4 +438,7 @@ $("folders").addEventListener("close", async () => {
   if ($("folders").returnValue === "ok") render(await invoke("set_folders", { folders: editing }));
 });
 
-invoke("get_overview").then(render);
+invoke("get_overview").then((o) => {
+  render(o);
+  $("query").focus();
+});
