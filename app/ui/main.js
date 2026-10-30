@@ -107,11 +107,37 @@ function toggleHistory() {
   list.replaceChildren(...searchHistory.map((q) => {
     const li = document.createElement("li");
     li.textContent = q;
+    li.tabIndex = -1;
     return li;
   }));
   if (!searchHistory.length) list.innerHTML = `<li class="empty">No history</li>`;
   list.hidden = false;
+  $("historyButton").focus();
 }
+
+// ↓/↑ move the focus from a dropdown's button through its items and back;
+// Enter on an item clicks it.
+function dropdownKeys(button, list, selector) {
+  const move = (e) => {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (list.hidden || !(step || (e.key === "Enter" && e.target !== button))) return;
+    e.preventDefault();
+    if (e.key === "Enter") return e.target.click();
+    const items = [...list.querySelectorAll(selector)];
+    const i = items.indexOf(e.target) + step;
+    (i < 0 ? button : items[Math.min(i, items.length - 1)])?.focus();
+  };
+  button.addEventListener("keydown", move);
+  list.addEventListener("keydown", move);
+}
+dropdownKeys($("historyButton"), $("history"), "li:not(.empty)");
+// Alt+↓ in the search box opens the history at its first item.
+$("query").addEventListener("keydown", (e) => {
+  if (!(e.altKey && e.key === "ArrowDown")) return;
+  e.preventDefault();
+  if ($("history").hidden) toggleHistory();
+  ($("history").querySelector("li:not(.empty)") || $("historyButton")).focus();
+});
 
 $("historyButton").onclick = toggleHistory;
 $("history").addEventListener("click", (e) => {
@@ -127,6 +153,12 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $("history").hidden = $("appMenu").hidden = true;
+  // Ctrl+L (Cmd+L on Mac) focuses the search box with its text selected.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "l") {
+    e.preventDefault();
+    $("query").focus();
+    $("query").select();
+  }
 });
 
 async function search() {
@@ -380,7 +412,11 @@ function applyFonts(f) {
 }
 
 // The ☰ menu; choosing an item closes it.
-$("menuButton").onclick = () => ($("appMenu").hidden = !$("appMenu").hidden);
+$("menuButton").onclick = () => {
+  $("appMenu").hidden = !$("appMenu").hidden;
+  $("menuButton").focus();
+};
+dropdownKeys($("menuButton"), $("appMenu"), "button");
 $("appMenu").addEventListener("click", () => ($("appMenu").hidden = true));
 
 $("font").onclick = async () => {
